@@ -12,9 +12,8 @@ implicit none
 !------------------Attribute type------------------
 type nc_att
     character(len=99) :: name
-    character(len=99) :: value_s
-    real :: value_r
-    integer :: value_i
+    character(len=99) :: value
+    character :: dtype
 end type
 
 
@@ -50,6 +49,12 @@ type nc_var
 
 end type
 
+!---------------Set attribute values---------------
+interface set_value
+    module procedure set_value_str
+    module procedure set_value_int
+    module procedure set_value_real
+end interface set_value
 
 private
 
@@ -57,7 +62,7 @@ private
 integer :: status
 
 !-------------------Public types-------------------
-public :: nc_att, nc_dim, nc_var
+public :: nc_att, nc_dim, nc_var, set_value
 
 !----------------Public procedures----------------
 public :: check, listVariables, getAttributes, getAxis
@@ -96,6 +101,40 @@ contains
         end if
     end function getDtype
 
+
+    !---Interface functions to set attribute values---
+    !-----------------Set string value-----------------
+    subroutine set_value_str(ncatt,value)
+        type(nc_att), intent(inout) :: ncatt
+        character(len=*), intent(in) :: value
+
+        ncatt%value=value
+        ncatt%dtype='s'
+    end subroutine
+
+    !------------------Set int value------------------
+    subroutine set_value_int(ncatt,value)
+        type(nc_att), intent(inout) :: ncatt
+        integer :: value
+
+        character(len=99) :: value_s
+        write(value_s,*) value
+
+        ncatt%value=value_s
+        ncatt%dtype='i'
+    end subroutine
+
+    !------------------Set real value------------------
+    subroutine set_value_real(ncatt,value)
+        type(nc_att), intent(inout) :: ncatt
+        real :: value
+
+        character(len=99) :: value_s
+        write(value_s,*) value
+
+        ncatt%value=value_s
+        ncatt%dtype='r'
+    end subroutine
 
 
     !----------------List variable list----------------
@@ -166,6 +205,8 @@ contains
             end if
         end do
 
+        write (format_str, "('(A10,i3,2x,A',i2,',A,A)')") maxlen
+
         !------------------Get attributes------------------
         do i=1,natts
             call check(nf90_inq_attname(ncid,varid,i,attname))
@@ -175,22 +216,20 @@ contains
             !-------------Store str form of value-------------
             if (xtype==nf90_char) then
                 call check(nf90_get_att(ncid,varid,attname,att_c))
-                att_j%value_s=att_c
-                write (format_str, "('(A10,i3,2x,A',i2,',A,A)')") maxlen
-                write(*,format_str) "Attribute", i, trim(attname), " = ", trim(att_c)
+                call set_value(att_j,att_c)
+
             !-------------Store int form of value-------------
             else if (xtype==nf90_int) then
                 call check(nf90_get_att(ncid,varid,attname,att_i))
-                att_j%value_i=att_i
-                write (format_str, "('(A10,i3,2x,A',i3,',A,i20)')") maxlen
-                write(*,format_str) "Attribute", i, trim(attname), " = ", att_i
+                call set_value(att_j,att_i)
+
             !-------------Store real form of value-------------
             else if (xtype==nf90_float) then
                 call check(nf90_get_att(ncid,varid,attname,att_r))
-                att_j%value_r=att_r
-                write (format_str, "('(A10,i3,2x,A',i3,',A,f20.5)')") maxlen
-                write(*,format_str) "Attribute", i, trim(attname), " = ", att_r
+                call set_value(att_j,att_r)
             end if
+
+            write(*,format_str) "Attribute", i, trim(attname), " = ", trim(att_j%value)
 
             attlist(i)=att_j
         end do
