@@ -11,8 +11,8 @@ implicit none
 
 !------------------Attribute type------------------
 type nc_att
-    character(len=80) :: name
-    character(len=80) :: value_s
+    character(len=99) :: name
+    character(len=99) :: value_s
     real :: value_r
     integer :: value_i
 end type
@@ -345,6 +345,7 @@ contains
         real, allocatable, dimension(:,:,:,:,:,:) :: data6
         real, allocatable, dimension(:,:,:,:,:,:,:) :: data7
 
+        write(*,*) " # <ncread>: Read in variable: ", var
         !-------------Get variable id by name-------------
         call check(nf90_inq_varid(ncid,var,varid))
 
@@ -373,39 +374,30 @@ contains
 
         else if (ndims==2) then
             allocate(data2(varshape(1),varshape(2)))
-            !data2=reshape(data2,(/varshape(1),varshape(2)/))
             call check(nf90_get_var(ncid,varid,data2))
             ncvar%data2=data2
 
         else if (ndims==3) then
             allocate(data3(varshape(1),varshape(2),varshape(3)))
-            !data3=reshape(data3,(/varshape(1),varshape(2),varshape(3)/))
             call check(nf90_get_var(ncid,varid,data3))
             ncvar%data3=data3
         else if (ndims==4) then
             allocate(data4(varshape(1),varshape(2),varshape(3),varshape(4)))
-            !data4=reshape(data4,(/varshape(1),varshape(2),varshape(3),varshape(4)/))
             call check(nf90_get_var(ncid,varid,data4))
             ncvar%data4=data4
         else if (ndims==5) then
             allocate(data5(varshape(1),varshape(2),varshape(3), &
                 & varshape(4),varshape(5)))
-            !data5=reshape(data4,(/varshape(1),varshape(2),varshape(3), &
-            !    & varshape(4),varshape(5)/))
             call check(nf90_get_var(ncid,varid,data5))
             ncvar%data5=data5
         else if (ndims==6) then
             allocate(data6(varshape(1),varshape(2),varshape(3), &
                 & varshape(4),varshape(5),varshape(6)))
-            !data6=reshape(data4,(/varshape(1),varshape(2),varshape(3), &
-                !& varshape(4),varshape(5),varshape(6)/))
             call check(nf90_get_var(ncid,varid,data6))
             ncvar%data6=data6
         else if (ndims==7) then
             allocate(data7(varshape(1),varshape(2),varshape(3), &
                 & varshape(4),varshape(5),varshape(6),varshape(7)))
-            !data7=reshape(data4,(/varshape(1),varshape(2),varshape(3), &
-             !  & varshape(4),varshape(5),varshape(6),varshape(7)/))
             call check(nf90_get_var(ncid,varid,data7))
             ncvar%data7=data7
         end if
