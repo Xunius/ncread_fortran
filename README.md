@@ -91,6 +91,7 @@ type(nc_var) :: var
 dim1=createDim("lon",lons)
 dim2=createDim("lat",lats)
 call setAxisList(var,(/dim1,dim2/))
+```
 
 4. Create a nc_var obj from name and data:
 ```
