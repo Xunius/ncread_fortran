@@ -3,6 +3,54 @@
 ! Author:      Guangzhi XU
 ! Email:       xugzhi1987@gmail.com
 ! Description: Tools to faciliate creating dimensions, attributes and variables
+!              
+!              # Usage
+!              1. Create a dimension obj from name and value:
+!              ```
+!              type(nc_att) :: dim
+!              dim=createDim("time",value,.true.)
+!              ```
+!              where: `value` is a 1-d array of the dimension values.
+!              Give the 3rd optional `.true.` argument if the dimension is unlimited length
+!              
+!              2. Add attribute to a nc_dim or nc_var obj:
+!              ```
+!              type(nc_att) :: dim
+!              type(nc_var) :: var
+!              call addAtt(dim,"units","meter")
+!              call addAtt(var,"long_name","precipitation")
+!              ```
+!
+!              3. Set a list of axis to a nc_var:
+!              ```
+!              type(nc_dim), dimension(2) :: axislist
+!              type(nc_dim) :: dim1, dim2
+!              type(nc_var) :: var
+!              dim1=createDim("lon",lons)
+!              dim2=createDim("lat",lats)
+!              call setAxisList(var,(/dim1,dim2/))
+!
+!              4. Create a nc_var obj from name and data:
+!              ```
+!              type(nc_var) :: var
+!              var=createVar("pre",data)
+!              ```
+!              Interface functions covers data ranks from 1 to 7 
+!
+!              5. Write dimension to netcdf file:
+!              ```
+!              type(nc_dim) :: dim1
+!              dim1=createDim("lon",lons)
+!              call check(nf90_create(FILE,nf90_clobber,ncid))
+!              call writeDim(ncid,dim1)
+!              ```
+!
+!              6. Write variable to netcdf file:
+!              ```
+!              type(nc_var) :: var
+!              call check(nf90_create(FILE,nf90_clobber,ncid))
+!              call writeVar(ncid,var)
+!              ```
 ! --------------------------------------------------------
 
 module nccreate
@@ -10,12 +58,11 @@ use ncread
 use netcdf
 implicit none
 
-
 private
-public :: createDim, addAtt, setAxisList, createVar
+public :: createDim, addAtt, setAxisList, createVar, writeDim, writeVar
 
 
-!---------------Set attribute values---------------
+!-----Add attributes to nc_dim or nc_var objs-----
 interface addAtt
     module procedure addAtt_var_str
     module procedure addAtt_var_int
@@ -54,22 +101,19 @@ contains
         if (present(istime)) then
             if (istime .eqv. .true.) then
                 len=nf90_unlimited
+                dim%istime=.true.
             else
                 len=size(value)
+                dim%istime=.false.
             end if
         else
             len=size(value)
         end if
 
-        !------------------Create dim------------------
-        !call check(nf90_redef(ncid))
-        !call check(nf90_def_dim(ncid,name,len,dimid))
-        !call check(nf90_enddef(ncid))
-
         !-------------Populate dim obj fields-------------
-        !dim%id=dimid
-        dim%len=len
+        dim%id=0           ! default
         dim%name=name
+        dim%len=len
         dim%natts=0
         dim%data=value
 
@@ -77,6 +121,9 @@ contains
         write(*,*) 
         write(*,*) " # <nccreate>: Create new dimension:"
         write(*,"(A,A,4x,A,i10)") "New dimension name = ", name, "Length = ", len
+        if (dim%istime .eqv. .true.) then
+            write(*,*) "Unlimited length dimension"
+        end if
         write(*,*) "Values = "
         if (size(value)<=20) then
             write(*,*) value
@@ -96,7 +143,7 @@ contains
         character(len=*), intent(in) :: value
 
         type(nc_att) :: att
-        type(nc_att), allocatable, dimension(:) :: att_list
+        type(nc_att), allocatable, dimension(:) :: att_list   ! new extended att list
         integer :: i, len
 
         !------------Get attributes from nc_var------------
@@ -330,31 +377,51 @@ contains
     ! Set axislist for a variable
         implicit none
         type(nc_var), intent(inout) :: var
-        type(nc_dim), dimension(:), intent(in) :: axislist
+        type(nc_dim), dimension(:), intent(inout) :: axislist
+
+        integer :: i
+        integer, dimension(:), allocatable :: varshape
 
         if (size(axislist) /= var%ndims) then
-            write(*,*) " # <nccreate>: Variable shape not match, return."
+            write(*,*) " # <nccreate>: Variable rank not match, return."
             return
         else
+            varshape=getShape(var)
+            do i=1,var%ndims
+                if (varshape(i)/=axislist(i)%len) then
+                    write(*,*) " # <nccreate>: Variable shape not match, return."
+                    return
+                end if
+                axislist(i)%id=i
+            end do
             var%axislist=axislist
             write(*,*) " # <nccreate>: Set axislist to variable"
         end if
 
+            
 
     end subroutine setAxisList
 
     !--------Create a new nc_var obj from data--------
-    function createVar_1d(name,data) result(ncvar)
+    function createVar_1d(name,data,axislist) result(ncvar)
     ! Create a new nc_var obj from data
         implicit none
         character(len=*), intent(in) :: name
         real, dimension(:), intent(in) :: data
+        type(nc_dim), allocatable, dimension(:), intent(inout), optional :: axislist
 
         type(nc_var) :: ncvar
 
+        ncvar%id=0          ! default
         ncvar%name=trim(name)
         ncvar%data1=data
         ncvar%ndims=1
+        ncvar%natts=0
+        ncvar%shape=shape(data)
+
+        if (present(axislist)) then
+            call setAxisList(ncvar,axislist)
+        end if
         
         write(*,*) 
         write(*,*) "# <nccreate>: Create new nc_var obj:"
@@ -364,17 +431,25 @@ contains
 
 
     !--------Create a new nc_var obj from data--------
-    function createVar_2d(name,data) result(ncvar)
+    function createVar_2d(name,data,axislist) result(ncvar)
     ! Create a new nc_var obj from data
         implicit none
         character(len=*), intent(in) :: name
         real, dimension(:,:), intent(in) :: data
+        type(nc_dim), allocatable, dimension(:), intent(inout), optional :: axislist
 
         type(nc_var) :: ncvar
 
+        ncvar%id=0          ! default
         ncvar%name=trim(name)
         ncvar%data2=data
         ncvar%ndims=2
+        ncvar%natts=0
+        ncvar%shape=shape(data)
+
+        if (present(axislist)) then
+            call setAxisList(ncvar,axislist)
+        end if
         
         write(*,*) 
         write(*,*) "# <nccreate>: Create new nc_var obj:"
@@ -383,17 +458,25 @@ contains
     end function createVar_2d
 
     !--------Create a new nc_var obj from data--------
-    function createVar_3d(name,data) result(ncvar)
+    function createVar_3d(name,data,axislist) result(ncvar)
     ! Create a new nc_var obj from data
         implicit none
         character(len=*), intent(in) :: name
         real, dimension(:,:,:), intent(in) :: data
+        type(nc_dim), allocatable, dimension(:), intent(inout), optional :: axislist
 
         type(nc_var) :: ncvar
 
+        ncvar%id=0          ! default
         ncvar%name=trim(name)
         ncvar%data3=data
         ncvar%ndims=3
+        ncvar%natts=0
+        ncvar%shape=shape(data)
+
+        if (present(axislist)) then
+            call setAxisList(ncvar,axislist)
+        end if
         
         write(*,*) 
         write(*,*) "# <nccreate>: Create new nc_var obj:"
@@ -403,17 +486,25 @@ contains
 
 
     !--------Create a new nc_var obj from data--------
-    function createVar_4d(name,data) result(ncvar)
+    function createVar_4d(name,data,axislist) result(ncvar)
     ! Create a new nc_var obj from data
         implicit none
         character(len=*), intent(in) :: name
         real, dimension(:,:,:,:), intent(in) :: data
+        type(nc_dim), allocatable, dimension(:), intent(inout), optional :: axislist
 
         type(nc_var) :: ncvar
 
+        ncvar%id=0          ! default
         ncvar%name=trim(name)
         ncvar%data4=data
         ncvar%ndims=4
+        ncvar%natts=0
+        ncvar%shape=shape(data)
+
+        if (present(axislist)) then
+            call setAxisList(ncvar,axislist)
+        end if
         
         write(*,*) 
         write(*,*) "# <nccreate>: Create new nc_var obj:"
@@ -423,17 +514,25 @@ contains
 
 
     !--------Create a new nc_var obj from data--------
-    function createVar_5d(name,data) result(ncvar)
+    function createVar_5d(name,data,axislist) result(ncvar)
     ! Create a new nc_var obj from data
         implicit none
         character(len=*), intent(in) :: name
         real, dimension(:,:,:,:,:), intent(in) :: data
+        type(nc_dim), allocatable, dimension(:), intent(inout), optional :: axislist
 
         type(nc_var) :: ncvar
 
+        ncvar%id=0          ! default
         ncvar%name=trim(name)
         ncvar%data5=data
         ncvar%ndims=5
+        ncvar%natts=0
+        ncvar%shape=shape(data)
+
+        if (present(axislist)) then
+            call setAxisList(ncvar,axislist)
+        end if
         
         write(*,*) 
         write(*,*) "# <nccreate>: Create new nc_var obj:"
@@ -442,17 +541,25 @@ contains
     end function createVar_5d
 
     !--------Create a new nc_var obj from data--------
-    function createVar_6d(name,data) result(ncvar)
+    function createVar_6d(name,data,axislist) result(ncvar)
     ! Create a new nc_var obj from data
         implicit none
         character(len=*), intent(in) :: name
         real, dimension(:,:,:,:,:,:), intent(in) :: data
+        type(nc_dim), allocatable, dimension(:), intent(inout), optional :: axislist
 
         type(nc_var) :: ncvar
 
+        ncvar%id=0          ! default
         ncvar%name=trim(name)
         ncvar%data6=data
         ncvar%ndims=6
+        ncvar%natts=0
+        ncvar%shape=shape(data)
+
+        if (present(axislist)) then
+            call setAxisList(ncvar,axislist)
+        end if
         
         write(*,*) 
         write(*,*) "# <nccreate>: Create new nc_var obj:"
@@ -462,25 +569,156 @@ contains
 
 
     !--------Create a new nc_var obj from data--------
-    function createVar_7d(name,data) result(ncvar)
+    function createVar_7d(name,data,axislist) result(ncvar)
     ! Create a new nc_var obj from data
         implicit none
         character(len=*), intent(in) :: name
         real, dimension(:,:,:,:,:,:,:), intent(in) :: data
+        type(nc_dim), allocatable, dimension(:), intent(inout), optional :: axislist
 
         type(nc_var) :: ncvar
 
+        ncvar%id=0          ! default
         ncvar%name=trim(name)
         ncvar%data7=data
         ncvar%ndims=7
+        ncvar%natts=0
+        ncvar%shape=shape(data)
 
+        if (present(axislist)) then
+            call setAxisList(ncvar,axislist)
+        end if
+        
         write(*,*) 
         write(*,*) "# <nccreate>: Create new nc_var obj:"
         write(*,*) "Data is referred as 'ncvar%data7'."
-        
+
     end function createVar_7d
 
+
+    !------------Write dimension to netcdf------------
+    subroutine writeDim(ncid,dim)
+    ! Write dimension to netcdf
+        implicit none
+        integer, intent(in) :: ncid
+        type(nc_dim), intent(inout) :: dim
+
+        integer :: len, dimid, natts, i,varid
+
+        write(*,*) 
+        write(*,*) "# <nccreate>: Writing dimension '", trim(dim%name), "' into netcdf: ", ncid, "..."
+
+        !------------------Create dim------------------
+        if (dim%istime .eqv. .true.) then
+            len=nf90_unlimited
+        else
+            len=size(dim%data)
+        end if
+
+        !--------------------Get dim id--------------------
+        call check(nf90_def_dim(ncid,dim%name,len,dimid))
+        dim%id=dimid
+
+        !-----------------Define variable-----------------
+        call check(nf90_def_var(ncid,dim%name,nf90_float,dimid,varid))
+
+        !-----------------Write attributes-----------------
+        if (allocated(dim%atts)) then
+            natts=size(dim%atts)
+            do i=1,natts
+                call check(nf90_put_att(ncid,varid,dim%atts(i)%name,dim%atts(i)%value))
+            end do
+        end if
+
+        !---------Exit define mode and write data---------
+        call check(nf90_enddef(ncid))
+        call check(nf90_put_var(ncid,varid,dim%data))
+        call check(nf90_redef(ncid))
+
+        write(*,*) 
+        write(*,*) "# <nccreate>: Dimension wrote into netcdf: ", ncid
+
+    end subroutine writeDim
+
+
+    !-------------Write variable to netcdf-------------
+    subroutine writeVar(ncid,var)
+    ! Write variable to netcdf
+        implicit none
+        integer, intent(in) :: ncid
+        type(nc_var), intent(inout) :: var
+
+        integer :: i, natts, varid, ndims
+        integer, allocatable, dimension(:) :: dimids
+
+        varid=var%id
+        ndims=var%ndims
+        natts=var%natts
+
+        write(*,*) 
+        write(*,*) "# <nccreate>: Writing variable '", trim(var%name), "' into netcdf: ", ncid, "..."
+
+        !--------------------Get dimids--------------------
+        if (allocated(var%axislist) .eqv. .false.) then
+            write(*,*) "# <nccreate>: Variable has no axis list. Return."
+            return
+        end if
+
+        allocate(dimids(ndims))
+        do i=1,ndims
+            dimids(i)=var%axislist(i)%id
+            call writeDim(ncid, var%axislist(i))
+        end do
+
+        !--------------------Write variable----------------
+        call check(nf90_def_var(ncid,var%name,nf90_float,dimids,varid))
+
+        !-----------------Write attributes-----------------
+        write(*,*) 
+        write(*,*) "# <nccreate>: Writing variable attributes into netcdf: ", ncid, "..."
+        if (allocated(var%atts) .eqv. .true.) then
+            do i=1,natts
+                call check(nf90_put_att(ncid,varid,var%atts(i)%name,var%atts(i)%value))
+            end do
+        end if
+
+        !--------------------Write data--------------------
+        call check(nf90_enddef(ncid))
+
+        write(*,*) 
+        write(*,*) "# <nccreate>: Writing variable data into netcdf: ", ncid, "..."
+        if (ndims==1) then
+            call check(nf90_put_var(ncid,varid,var%data1))
+        else if (ndims==2) then
+            call check(nf90_put_var(ncid,varid,var%data2))
+        else if (ndims==3) then
+            call check(nf90_put_var(ncid,varid,var%data3))
+        else if (ndims==4) then
+            call check(nf90_put_var(ncid,varid,var%data4))
+        else if (ndims==5) then
+            call check(nf90_put_var(ncid,varid,var%data5))
+        else if (ndims==6) then
+            call check(nf90_put_var(ncid,varid,var%data6))
+        else if (ndims==7) then
+            call check(nf90_put_var(ncid,varid,var%data7))
+        end if
+        call check(nf90_redef(ncid))
+        
+        write(*,*) 
+        write(*,*) "# <nccreate>: Variable wrote into netcdf: ", ncid
+
+        
+
+    end subroutine writeVar
+
+
+
+
 end module nccreate
+
+
+
+
 
 
 program main
@@ -489,51 +727,23 @@ use nccreate
 use ncread
 implicit none
 
-character(len=*), parameter :: FILE_NAME="pre_s_m_2000_ori-preprocessed.nc"
+character(len=*), parameter :: FILE_OUT="testout.nc"
 integer :: ncid, i
 real, allocatable, dimension(:) :: dimvalue
 real, allocatable, dimension(:,:) :: dummy
 type(nc_dim) :: dim1, dim2
 type(nc_dim), dimension(2) :: axislist
 type(nc_var) :: var
-type(nc_att) :: att
-
-character(len=99), allocatable,dimension(:) :: varlist
-
-!--------------------Open file--------------------
-call check(nf90_open(FILE_NAME,nf90_write,ncid))
-write(*,*) "ncid:", ncid
-
-!write(*,*) att%name, att%value
-!if (allocated(dim%atts)) then
-    !write(*,*) dim%atts
-!else
-    !write(*,*) "NOT"
-    
-!end if
-!varlist=listVariables(ncid)
 
 
+!----------------Create dimensions----------------
 allocate(dimvalue(5))
 dimvalue=(/1.0, 2.0, 3.0, 4.0, 5.0/)
 
-allocate(dummy(2,5))
-dummy=reshape((/1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0/),(/2,5/))
-
-write(*,*) "shape", shape(dummy)
-
-var=createVar("dummy",dummy)
-
-write(*,*) var%name, var%data2, var%natts
-
 dim1=createDim("dim1",(/10.,20./))
 dim2=createDim("dim2",dimvalue)
-
-axislist=(/dim1,dim2/)
-
-write(*,*) size(axislist), var%ndims
-
-call setAxisList(var,axislist)
+dim1%id=1
+dim2%id=2
 
 call addAtt(dim1,"id",1)
 call addAtt(dim2,"id",2)
@@ -541,40 +751,29 @@ call addAtt(dim2,"id",2)
 call addAtt(dim1,"units","db")
 call addAtt(dim2,"units","m")
 
+!--------------Create dummy variable--------------
+allocate(dummy(2,5))
+dummy=reshape((/1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0/),(/2,5/))
+
+var=createVar("dummy",dummy)
+axislist=(/dim1,dim2/)
+var%id=1
+
+call setAxisList(var,axislist)
+
+!------------------Add attributes------------------
 call addAtt(var,"long_name", "a dummy variable")
 call addAtt(var,"units", "stupidity")
 
+!-------------Write to new netcdf file-------------
+call check(nf90_create(FILE_OUT,nf90_clobber,ncid))
+write(*,*) "ncid:", ncid
 
-write(*,*) var%name, var%id, var%data2, var%natts
-
-do i=1,var%natts
-    write(*,*) var%atts(i)%name, var%atts(i)%value
-end do
+call writeVar(ncid,var)
+call check(nf90_close(ncid))
 
 
-!write(*,*) dim%id, dim%name, dim%natts, dim%data, dim%atts
 
-!var=getVar(ncid,"pre")
-
-!call addAtt(var,"testatt","value!!!")
-!call addAtt(var,"testatt2",100)
-!call addAtt(var,"testatt2",200.5)
-
-!do i=1,var%natts
-    !write(*,"(A,4x,A)") trim(var%atts(i)%name), trim(var%atts(i)%value)
-!end do
-
-!write(*,*) 
-!write(*,*) 
-!dim=getAxis(ncid,5)
-
-!call addAtt(dim,"testdimatt","value!!!!!!!")
-!call addAtt(dim,"testdimatt",100)
-!call addAtt(dim,"testdimatt",100.5)
-
-!do i=1,dim%natts
-    !write(*,"(A,4x,A)") trim(dim%atts(i)%name), trim(dim%atts(i)%value)
-!end do
 
 
 

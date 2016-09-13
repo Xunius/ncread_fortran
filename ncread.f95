@@ -23,6 +23,14 @@
 !              they are defined separately.
 !
 !              # Usages:
+!
+!              To compile:
+!              ```
+!              gfortran -o outfile -I/usr/include/ -L/usr/lib/ -lnetcdf ncread.f95 main.f95 /usr/lib/libnetcdf.a
+!              ```
+!              where `main.f95` is the main program that uses this module, `outfile` is the output file.
+!              ```
+!
 !              1. To list all variables in a file:
 !                 ```
 !                 integer :: ncid
@@ -60,30 +68,34 @@ implicit none
 
 !------------------Attribute type------------------
 type nc_att
-    character(len=99) :: name
-    character(len=99) :: value
-    character :: dtype
+    character(len=99) :: name = ""
+    character(len=99) :: value = ""
+    character :: dtype = "s"
+    ! 's' for string
+    ! 'i' for int
+    ! 'r' for real
+    ! all converted to string
 end type
 
 
 !------------------dimension type------------------
 type nc_dim
-    integer :: id
-    integer :: len
-    integer :: natts
-    character(len=30) :: name
+    integer :: id=0
+    integer :: len=0
+    integer :: natts=0
+    logical :: istime = .false.
+    character(len=99) :: name=""
     type(nc_att), allocatable, dimension(:) :: atts
-
     real, allocatable, dimension(:) :: data
 end type
 
 
 !-----------------nc variable type-----------------
 type nc_var
-    integer :: id
-    integer :: ndims
-    integer :: natts
-    character(len=20) :: name
+    integer :: id=0
+    integer :: ndims=0
+    integer :: natts=0
+    character(len=20) :: name=""
     integer, allocatable, dimension(:) :: shape
     type(nc_att), allocatable, dimension(:) :: atts
     type(nc_dim), allocatable, dimension(:) :: axislist
@@ -104,6 +116,12 @@ interface set_value
     module procedure set_value_int
     module procedure set_value_real
 end interface set_value
+
+!----------------Get variable shape----------------
+interface getShape
+    module procedure getShape_file
+    module procedure getShape_var
+end interface getShape
 
 private
 
@@ -221,8 +239,8 @@ contains
         type(nc_att), allocatable, dimension(:) :: attlist  ! a list of nc_att objs
 
         type(nc_att) :: att_j                               ! iterator nc_att obj
-        character(len=80) :: attname                        ! attribute name
-        character(len=80) :: att_c                          ! attribute value, str form
+        character(len=99) :: attname                        ! attribute name
+        character(len=99) :: att_c                          ! attribute value, str form
         real :: att_r                                       ! attribute value, real form
         integer :: att_i                                    ! attribute value, int form
 
@@ -305,6 +323,7 @@ contains
 
         type(nc_att), allocatable, dimension(:) :: attlist  ! a list of nc_att objs
         integer :: i, dimlen, dimid 
+        integer :: unlimiteddimid
 
         !---------------Get axis name by id---------------
         call check(nf90_inquire_dimension(ncid,id,dimname,dimlen))
@@ -316,17 +335,6 @@ contains
         allocate(values(dimlen))
         call check(nf90_get_var(ncid,dimid,values))
 
-        !--------------------Print info--------------------
-        write(*,*) 
-        write(*,"(A,i3,4x,A,A,A,i5)") " Axis ", id, "  Name = ", trim(dimname), "  Length = ", dimlen
-        write(*,*) "    Axis values: "
-
-        if (dimlen<=20) then
-            write(*,*) values
-        else
-            write(*,*) values(1:5), " ... ", values(dimlen-5:dimlen)
-        end if
-
         !---------------Get axis attributes---------------
         attlist=getAttributes(ncid,trim(dimname))
 
@@ -337,6 +345,29 @@ contains
         axis%natts=size(attlist)
         axis%atts=attlist
         axis%data=values
+
+        !-----------Check if unlimited dimension-----------
+        call check(nf90_inquire(ncid,unlimiteddimid=unlimiteddimid))
+        if (unlimiteddimid==id) then
+            axis%istime=.true.
+        else
+            axis%istime=.false.
+        end if
+
+        !--------------------Print info--------------------
+        write(*,*) 
+        write(*,"(A,i3,4x,A,A,A,i5)") " Axis ", id, "  Name = ", trim(dimname), "  Length = ", dimlen
+        if (axis%istime .eqv. .true.) then
+            write(*,*) "Dimension is unlimited"
+        end if
+            write(*,*) "Dimension is not unlimited"
+        write(*,*) "    Axis values: "
+
+        if (dimlen<=20) then
+            write(*,*) values
+        else
+            write(*,*) values(1:5), " ... ", values(dimlen-5:dimlen)
+        end if
 
     end function getAxis
 
@@ -378,7 +409,7 @@ contains
 
 
     !-----------Get the shape of a variable.-----------
-    function getShape(ncid,var) result(shape_vec)
+    function getShape_file(ncid,var) result(shape_vec)
     ! Get the shape of a variable.
         implicit none
         integer, intent(in) :: ncid
@@ -406,7 +437,50 @@ contains
         write(*,*) "# <ncread>: Get shape of variable '", var, "`:"
         write(*,*) "Shape = (", shape_vec, ")"
 
-    end function getShape
+    end function getShape_file
+
+    !-----------Get the shape of a variable.-----------
+    function getShape_var(var) result(shape_vec)
+    ! Get the shape of a variable.
+        implicit none
+        type(nc_var), intent(in) :: var
+        integer, allocatable, dimension(:) :: shape_vec
+
+        integer :: i, ndims, varid, dimlen
+        integer, allocatable, dimension(:) :: dimids
+
+        !--------------------Get shape--------------------
+        ndims=var%ndims
+
+        if (ndims==1) then
+            allocate(shape_vec(1))
+            shape_vec=shape(var%data1)
+        else if (ndims==2) then
+            allocate(shape_vec(2))
+            shape_vec=shape(var%data2)
+        else if (ndims==3) then
+            allocate(shape_vec(3))
+            shape_vec=shape(var%data3)
+        else if (ndims==4) then
+            allocate(shape_vec(4))
+            shape_vec=shape(var%data4)
+        else if (ndims==5) then
+            allocate(shape_vec(5))
+            shape_vec=shape(var%data5)
+        else if (ndims==6) then
+            allocate(shape_vec(6))
+            shape_vec=shape(var%data6)
+        else if (ndims==7) then
+            allocate(shape_vec(7))
+            shape_vec=shape(var%data7)
+        end if
+
+        !--------------------Print info--------------------
+        write(*,*) 
+        write(*,*) "# <ncread>: Get shape of variable '", trim(var%name), "`:"
+        write(*,*) "Shape = (", shape_vec, ")"
+
+    end function getShape_var
 
 
 
@@ -424,7 +498,6 @@ contains
         type(nc_att), allocatable, dimension(:) :: attlist    ! a list of nc_att objs
 
         !---------------Array to store data---------------
-        real, allocatable, dimension(:) :: dummy
         real, allocatable, dimension(:) :: data1
         real, allocatable, dimension(:,:) :: data2
         real, allocatable, dimension(:,:,:) :: data3
@@ -441,7 +514,7 @@ contains
         call check(nf90_inquire_variable(ncid,varid,ndims=ndims))
 
         !------------------Get var shape------------------
-        varshape=getShape(ncid,var)
+        varshape=getShape_file(ncid,var)
 
         !------------------Get total size------------------
         varsize=product(varshape)
@@ -452,9 +525,7 @@ contains
         !------------------Get attributes------------------
         attlist=getAttributes(ncid,var)
 
-        !------------Get data into dummy vector------------
-
-        !-------------Reshape to correct shape-------------
+        !----------------Get variable data----------------
         if (ndims==1) then
             allocate(data1(varsize))
             call check(nf90_get_var(ncid,varid,data1))
@@ -496,6 +567,7 @@ contains
         ncvar%shape=varshape
         ncvar%ndims=ndims
         ncvar%atts=attlist
+        ncvar%natts=size(attlist)
         ncvar%axislist=axislist
 
         !--------------------Print info--------------------
@@ -510,63 +582,3 @@ contains
 
 end module ncread
 
-
-
-
-program main
-use netcdf
-use ncread
-implicit none
-
-character(len=*), parameter :: FILE_NAME="pre_s_m_2000_ori-preprocessed.nc"
-integer :: ncid, i
-character(len=99), allocatable,dimension(:) :: varlist
-type(nc_att), allocatable, dimension(:) :: att_list
-type(nc_dim), allocatable, dimension(:) :: axis_list
-integer, allocatable, dimension(:) :: varshape
-type(nc_var) :: ncvar
-!type(ncvar) :: var
-
-!--------------------Open file--------------------
-call check(nf90_open(FILE_NAME,nf90_nowrite,ncid))
-write(*,*) "ncid:", ncid
-
-!var=newVar(ncid)
-!varlist=listVariables(ncid)
-!do i=1,size(varlist)
-!    write(*,*) varlist(i)
-!end do
-
-
-!att_list=getAttributes(ncid, "time")
-!do i=1,size(att_list)
-!    write(*,*) att_list(i)%name, att_list(i)%str
-!end do
-
-
-!axis_list=getAxisList(ncid, "pre")
-!write(*,*) size(axis_list)
-!do i=1,size(axis_list)
-     !write(*,*) axis_list(i)%id, axis_list(i)%name, axis_list(i)%data
-!end do
-
-!varshape=getShape(ncid,"pre")
-!write(*,*) varshape
-
-
-!write(*,*) 
-!write(*,*) 
-
-ncvar=getVar(ncid,"pre")
-write(*,*) "ncvar.id", ncvar%id, "ncvar.name", ncvar%name
-write(*,*) "ncvar.shape", ncvar%shape, shape(ncvar%data4)
-do i=1,size(ncvar%atts)
-    write(*,*) ncvar%atts(i)%name
-end do
-
-
-
-
-
-
-end program main
