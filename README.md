@@ -68,49 +68,49 @@ they are defined separately.
 ## Usage
 
 1. Create a dimension obj from name and value:
-```
-type(nc_att) :: dim
-dim=createDim("time",value,.true.)
-```
-where: `value` is a 1-d array of the dimension values.
-Give the 3rd optional `.true.` argument if the dimension is unlimited length
+  ```
+  type(nc_att) :: dim
+  dim=createDim("time",value,.true.)
+  ```
+  where: `value` is a 1-d array of the dimension values.
+  Give the 3rd optional `.true.` argument if the dimension is unlimited length
 
 2. Add attribute to a nc_dim or nc_var obj:
-```
-type(nc_att) :: dim
-type(nc_var) :: var
-call addAtt(dim,"units","meter")
-call addAtt(var,"long_name","precipitation")
-```
+  ```
+  type(nc_att) :: dim
+  type(nc_var) :: var
+  call addAtt(dim,"units","meter")
+  call addAtt(var,"long_name","precipitation")
+  ```
 
 3. Set a list of axis to a nc_var:
-```
-type(nc_dim), dimension(2) :: axislist
-type(nc_dim) :: dim1, dim2
-type(nc_var) :: var
-dim1=createDim("lon",lons)
-dim2=createDim("lat",lats)
-call setAxisList(var,(/dim1,dim2/))
-```
+  ```
+  type(nc_dim), dimension(2) :: axislist
+  type(nc_dim) :: dim1, dim2
+  type(nc_var) :: var
+  dim1=createDim("lon",lons)
+  dim2=createDim("lat",lats)
+  call setAxisList(var,(/dim1,dim2/))
+  ```
 
 4. Create a nc_var obj from name and data:
-```
-type(nc_var) :: var
-var=createVar("pre",data)
-```
-Interface functions covers data ranks from 1 to 7 
+  ```
+  type(nc_var) :: var
+  var=createVar("pre",data)
+  ```
+  Interface functions covers data ranks from 1 to 7 
 
 5. Write dimension to netcdf file:
-```
-type(nc_dim) :: dim1
-dim1=createDim("lon",lons)
-call check(nf90_create(FILE,nf90_clobber,ncid))
-call writeDim(ncid,dim1)
-```
+  ```
+  type(nc_dim) :: dim1
+  dim1=createDim("lon",lons)
+  call check(nf90_create(FILE,nf90_clobber,ncid))
+  call writeDim(ncid,dim1)
+  ```
 
 6. Write variable to netcdf file:
-```
-type(nc_var) :: var
-call check(nf90_create(FILE,nf90_clobber,ncid))
-call writeVar(ncid,var)
-```
+  ```
+  type(nc_var) :: var
+  call check(nf90_create(FILE,nf90_clobber,ncid))
+  call writeVar(ncid,var)
+  ```
